@@ -1,0 +1,10 @@
+[
+    {
+        "name": "company",
+        "query": "http.title:\"website\" -org:\"company\""
+    },
+    {
+        "name": "company2",
+        "query": "http.title:\"website2\" -org:\"company2\""
+    }
+]
