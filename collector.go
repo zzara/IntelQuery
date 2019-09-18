@@ -8,8 +8,7 @@ import (
 	"log"
 	"math"
 	"os"
-	"queryapiintel/shodan"
-	"queryapiintel/urlscan"
+	"queryapiintel/clients"
 	"runtime"
 	"sync"
 	"time"
@@ -48,10 +47,17 @@ type MyEvent struct {
 
 // load client return json
 func jsonLoader(filename string) []JsonMapper {
-	f, err := os.Open(fmt.Sprintf("%s%s", filename, ".json"))
+
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	f, err := os.Open(fmt.Sprintf("%s/%s%s", dir, filename, ".json"))
 	if err != nil {
 		fmt.Println(err)
 	}
+
 	log.Printf("status=successfully_opened_query_json_file message=%s\n", filename)
 	defer f.Close()
 
@@ -193,8 +199,8 @@ func queryApi(client *Client, clientQueryFunction func(string) []byte, apiClient
 // api streams, main function for initializing clients
 func openApiChannels() {
 	// create api clients and load json queries
-	sc := &Client{Type: "shodan", Queries: jsonLoader("shodan_queries"), Client: shodan.ShodanClient(os.Getenv("SHODAN_KEY"))}
-	uc := &Client{Type: "urlscan", Queries: jsonLoader("urlscan_queries"), Client: urlscan.UrlscanClient(os.Getenv("URLSCAN_KEY"))}
+	sc := &Client{Type: "shodan", Queries: jsonLoader("shodan_queries"), Client: clients.ShodanClient(os.Getenv("SHODAN_KEY"))}
+	uc := &Client{Type: "urlscan", Queries: jsonLoader("urlscan_queries"), Client: clients.UrlscanClient(os.Getenv("URLSCAN_KEY"))}
 
 	// wait group for clients
 	var clientWaitGroup sync.WaitGroup
@@ -203,9 +209,9 @@ func openApiChannels() {
 
 	// execute api client channel
 	clientWaitGroup.Add(1)
-	go queryApi(sc, sc.Client.(*shodan.Client).Query, apiClientChannel, &clientWaitGroup)
+	go queryApi(sc, sc.Client.(*clients.Client).Query, apiClientChannel, &clientWaitGroup)
 	clientWaitGroup.Add(1)
-	go queryApi(uc, uc.Client.(*urlscan.Client).Query, apiClientChannel, &clientWaitGroup)
+	go queryApi(uc, uc.Client.(*clients.Client).Query, apiClientChannel, &clientWaitGroup)
 
 	//wait for client wait group to then close the channel
 	clientWaitGroup.Wait()
@@ -230,7 +236,7 @@ func main() {
 	// logging
 	log.SetFlags(0)
 	log.SetOutput(new(LogWriter))
-	log.Println("status=gonyr_process_started message=started")
+	log.Println("status=collection_process_started message=started")
 
 	// auto-detect environment for osx, launch non-lambda, for testing
 	log.Printf("status=os_detected message=%s\n", runtime.GOOS)
