@@ -26,7 +26,7 @@ func (writer LogWriter) Write(bytes []byte) (int, error) {
 
 // constants
 const GLOBAL_LIMITER time.Duration = 1100
-const OUTPUT_FOLDER string = "/tmp/gonyr/"
+const OUTPUT_FOLDER string = "/tmp/intelquery/"
 
 // json map for loading json queries
 type JsonMapper struct {
