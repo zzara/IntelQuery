@@ -8,7 +8,7 @@ import (
 	"log"
 	"math"
 	"os"
-	"queryapiintel/clients"
+	"intelquery/clients"
 	"runtime"
 	"sync"
 	"time"
