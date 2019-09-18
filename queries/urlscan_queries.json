@@ -1,0 +1,6 @@
+[
+    {
+        "name": "company",
+        "query": "filename:company_favicon.ico%20AND%20-domain:www.company.com"
+    }
+]
