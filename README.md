@@ -1,4 +1,4 @@
-# intelquery.go
+# intelquery
 query multiple intelligence apis
 
 ## compile
