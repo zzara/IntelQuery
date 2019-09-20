@@ -1,7 +1,7 @@
 # intelquery
 query multiple intelligence apis
 
-## compile
+## Compile
 
 ### mac
 
@@ -11,11 +11,11 @@ GOOS=darwin go build -o intelquery intelquery
 
 GOOS=linux go build -o intelquery intelquery
 
-###
+## Queries
 
-edit query name and query syntax in queries dir
+Edit query name and query syntax by modifying the query Json file in queries dir
 
-## environment
+## Environment Variables
 
 export SHODAN_KEY=\<key>
 
