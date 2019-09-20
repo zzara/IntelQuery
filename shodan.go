@@ -3,10 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
-	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -14,6 +12,7 @@ import (
 )
 
 // create shodan client
+// curl -X GET 'https://api.shodan.io/shodan/host/search?key<apikey>&query=http.title:paypal&page=0'
 func NewShodanClient() *QueryClient {
 	basePath := "https://api.shodan.io"
 	searchPath := "/shodan/host/search"
@@ -36,37 +35,15 @@ func NewShodanClient() *QueryClient {
 func shodanQuery(query *Query, pq *[]Query, chnl chan []interface{}, wg2 *sync.WaitGroup) {
 	defer wg2.Done()
 
-	httpClient := &http.Client{}
-
 	url, err := url.Parse(query.Query + strconv.Itoa(query.Page))
 
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	req, err := http.NewRequest("GET", url.String(), nil)
+	respBodyStr := handleRequest(url)
 
-	fmt.Println(url.String())
-
-	if err != nil {
-		fmt.Println(err)
-	}
-	resp, err := httpClient.Do(req)
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	respBodyStr := string(body)
-
-	fmt.Println(len(respBodyStr))
-
-	var result map[string]interface{}
-	json.Unmarshal([]byte(respBodyStr), &result)
-
-	file, _ := json.MarshalIndent(result, "", " ")
+	file := processResponse(respBodyStr)
 
 	// a map container to decode the JSON structure into
 	contain := make(map[string]interface{})
