@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +20,7 @@ type QueryMapper struct {
 	Query string
 }
 
+// Struct for holding all of the API relevant information and parameters
 type QueryClient struct {
 	clientType  string
 	queries     []QueryMapper
@@ -28,16 +33,14 @@ type QueryClient struct {
 	rateLimit   int
 }
 
+// Struct for maintaining the query syntax and page number
 type Query struct {
 	Query string
 	Page  int
 }
 
-// In the future, type will be: chnl chan []interface{}
-// This will be due to the map iterator for finding things
-
 // Request func for iterating through API calls to different services
-func requestor(s *QueryClient, clientQuery func(*Query, *[]Query, chan []interface{}, *sync.WaitGroup), chnl chan []interface{}, wg *sync.WaitGroup) {
+func requestor(qc *QueryClient, clientQuery func(*Query, *[]Query, chan []interface{}, *sync.WaitGroup), chnl chan []interface{}, wg *sync.WaitGroup) {
 	// Wait group for queryApiChannels
 	defer wg.Done()
 
@@ -46,21 +49,21 @@ func requestor(s *QueryClient, clientQuery func(*Query, *[]Query, chan []interfa
 	var pagequeries []Query
 
 	// Iterate queries loaded from Json, pass them to the clientQuery function
-	for _, ci := range s.queries {
+	for _, ci := range qc.queries {
 		wg2.Add(1)
-		query := &Query{Query: s.queryString + ci.Query + s.queryPage, Page: s.startPage}
+		query := &Query{Query: qc.queryString + ci.Query + qc.queryPage, Page: qc.startPage}
 		go clientQuery(query, &pagequeries, chnl, &wg2)
-		time.Sleep(time.Millisecond * time.Duration(s.rateLimit))
+		time.Sleep(time.Millisecond * time.Duration(qc.rateLimit))
 	}
 	wg2.Wait()
-	fmt.Println("YEES")
+	fmt.Println("YEEES")
 	// Iterate through pages of queries
 	if len(pagequeries) > 0 {
 		for _, ci := range pagequeries {
 			wg2.Add(1)
-			query := &Query{Query: s.queryString + ci.Query + s.queryPage, Page: ci.Page}
+			query := &Query{Query: qc.queryString + ci.Query + qc.queryPage, Page: ci.Page}
 			go clientQuery(query, &pagequeries, chnl, &wg2)
-			time.Sleep(time.Millisecond * time.Duration(s.rateLimit))
+			time.Sleep(time.Millisecond * time.Duration(qc.rateLimit))
 		}
 	}
 
@@ -80,6 +83,7 @@ func queryApiChannels() {
 	wg.Wait()
 	close(ch)
 
+	// Collect the channel data
 	for {
 		v, ok := <-ch
 		if ok == false {
@@ -91,7 +95,7 @@ func queryApiChannels() {
 }
 
 // Processes Json response into []byte format
-func ProcessResponse(resp string) []byte {
+func processResponse(resp string) []byte {
 	var result map[string]interface{}
 	json.Unmarshal([]byte(resp), &result)
 
@@ -99,17 +103,43 @@ func ProcessResponse(resp string) []byte {
 	return file
 }
 
+// Handle the request to the API
+func handleRequest(url *url.URL) string {
+	httpClient := &http.Client{}
+
+	req, err := http.NewRequest("GET", url.String(), nil)
+
+	fmt.Println(url.String())
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	resp, err := httpClient.Do(req)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	respBodyStr := string(body)
+	return respBodyStr
+}
+
 // Loads and maps each query from the Json query file
 func queryLoader(filename string) []QueryMapper {
 
-	// Get folder pth of the current binary execution
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Get folder path of the current binary execution
+	_, goBinPath, _, _ := runtime.Caller(0)
+	// Split file path
+	dirSplitPath := strings.Split(goBinPath, "/")
+	// Remove last element of array
+	dirPathMod := dirSplitPath[:len(dirSplitPath)-1]
+	// join path
+	dirPath := strings.Join(dirPathMod, "/")
 
 	// Load the Json query file into f
-	f, err := os.Open(fmt.Sprintf("%s/%s%s", dir, filename, ".json"))
+	f, err := os.Open(fmt.Sprintf("%s/queries/%s%s", dirPath, filename, ".json"))
 	if err != nil {
 		log.Printf("message=failed_to_open_query_file error=%s\n", err)
 	}
