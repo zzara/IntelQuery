@@ -12,7 +12,7 @@ import (
 )
 
 // create shodan client
-// curl -X GET 'https://api.shodan.io/shodan/host/search?key<apikey>&query=http.title:paypal&page=0'
+// curl -X GET 'https://api.shodan.io/shodan/host/search?key<apikey>&query=http.title:shodan&page=0'
 func NewShodanClient() *QueryClient {
 	basePath := "https://api.shodan.io"
 	searchPath := "/shodan/host/search"
