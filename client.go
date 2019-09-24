@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -40,58 +41,87 @@ type Query struct {
 }
 
 // Request func for iterating through API calls to different services
-func requestor(qc *QueryClient, clientQuery func(*Query, *[]Query, chan []interface{}, *sync.WaitGroup), chnl chan []interface{}, wg *sync.WaitGroup) {
+func requestor(qc *QueryClient, clientQuery func(*Query, *[]Query, chan string, *sync.WaitGroup), ch chan string, wg *sync.WaitGroup) {
 	// Wait group for queryApiChannels
-	defer wg.Done()
+	//defer wg.Done()
 
 	// Establish waitgroup for clientQuery requests
 	var wg2 sync.WaitGroup
+
 	var pagequeries []Query
 
 	// Iterate queries loaded from Json, pass them to the clientQuery function
 	for _, ci := range qc.queries {
 		wg2.Add(1)
 		query := &Query{Query: qc.queryString + ci.Query + qc.queryPage, Page: qc.startPage}
-		go clientQuery(query, &pagequeries, chnl, &wg2)
+		go clientQuery(query, &pagequeries, ch, &wg2)
 		time.Sleep(time.Millisecond * time.Duration(qc.rateLimit))
 	}
 	wg2.Wait()
-	fmt.Println("YEEES")
+
 	// Iterate through pages of queries
 	if len(pagequeries) > 0 {
 		for _, ci := range pagequeries {
 			wg2.Add(1)
 			query := &Query{Query: qc.queryString + ci.Query + qc.queryPage, Page: ci.Page}
-			go clientQuery(query, &pagequeries, chnl, &wg2)
+			go clientQuery(query, &pagequeries, ch, &wg2)
 			time.Sleep(time.Millisecond * time.Duration(qc.rateLimit))
 		}
 	}
 
 	// Wait untl all of the requests have been processed before closing the channel
 	wg2.Wait()
+	wg.Done()
+	return
 }
 
-// api streams, main function for initializing clients
+// Use regexp to look for domains and URLs in the matched queries
+func extractIOCs(data []interface{}) []string {
+	var resultIOCs []string
+	urlRe := regexp.MustCompile("((?:ht)?f?tps?:\\/\\/?(?:[a-z0-9_]{1,}\\.){1,}[a-z]{1,10}(?:\\/(?:[a-zA-Z0-9_\\-\\?\\!\\@\\#\\:\\(\\)\\=\\+\\&]{1,})?){0,})")
+	ipRe := regexp.MustCompile("([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})")
+	for _, d := range data {
+		str := fmt.Sprintf("%v", d)
+		//fmt.Println(str)
+		urlMatch := urlRe.FindStringSubmatch(str)
+		if urlMatch != nil {
+			for _, ioc := range urlMatch[1:] {
+				fmt.Println(ioc)
+				resultIOCs = append(resultIOCs, fmt.Sprintf("%s", ioc))
+			}
+		}
+		ipMatch := ipRe.FindStringSubmatch(str)
+		if ipMatch != nil {
+			for _, ioc := range ipMatch[1:] {
+				fmt.Println(ioc)
+				resultIOCs = append(resultIOCs, fmt.Sprintf("%s", ioc))
+			}
+		}
+	}
+	return resultIOCs
+}
+
+// Api streams, main function for initializing clients
 func queryApiChannels() {
 	// Create api clients and load json queries
-	ch := make(chan []interface{})
+	ch := make(chan string)
 	var wg sync.WaitGroup
+
 	wg.Add(1)
 	go requestor(NewShodanClient(), shodanQuery, ch, &wg)
 	wg.Add(1)
 	go requestor(NewUrlscanClient(), urlscanQuery, ch, &wg)
-	wg.Wait()
-	close(ch)
 
-	// Collect the channel data
-	for {
-		v, ok := <-ch
-		if ok == false {
-			break
-		}
-		fmt.Println("Received ", len(v), ok)
-	}
 	wg.Wait()
+
+	// Close channel and get data
+	close(ch)
+	data := <-ch
+
+	// Print data from channel
+	for _, d := range data {
+		fmt.Println(d)
+	}
 }
 
 // Processes Json response into []byte format
@@ -105,7 +135,7 @@ func processResponse(resp string) []byte {
 
 // Handle the request to the API
 func handleRequest(url *url.URL) string {
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Timeout: time.Second * 10}
 
 	req, err := http.NewRequest("GET", url.String(), nil)
 
@@ -116,13 +146,17 @@ func handleRequest(url *url.URL) string {
 	}
 	resp, err := httpClient.Do(req)
 
+	var respBodyStr string
+	var body []byte
+
 	if err != nil {
 		fmt.Println(err)
+	} else {
+		defer resp.Body.Close()
+		body, err = ioutil.ReadAll(resp.Body)
 	}
 
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	respBodyStr := string(body)
+	respBodyStr = string(body)
 	return respBodyStr
 }
 
