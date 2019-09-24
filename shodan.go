@@ -20,7 +20,7 @@ func NewShodanClient() *QueryClient {
 
 	return &QueryClient{
 		clientType:  "shodan",
-		queries:     queryLoader("shodan_queries"),
+		queries:     queryLoader("shodan_queries_test"),
 		apiKey:      apiKey,
 		baseUrl:     basePath,
 		searchPath:  searchPath,
@@ -32,8 +32,7 @@ func NewShodanClient() *QueryClient {
 }
 
 // client query function
-func shodanQuery(query *Query, pq *[]Query, chnl chan []interface{}, wg2 *sync.WaitGroup) {
-	defer wg2.Done()
+func shodanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup) {
 
 	url, err := url.Parse(query.Query + strconv.Itoa(query.Page))
 
@@ -41,8 +40,8 @@ func shodanQuery(query *Query, pq *[]Query, chnl chan []interface{}, wg2 *sync.W
 		fmt.Println(err)
 	}
 
+	// Handle http request and response
 	respBodyStr := handleRequest(url)
-
 	file := processResponse(respBodyStr)
 
 	// a map container to decode the JSON structure into
@@ -56,6 +55,7 @@ func shodanQuery(query *Query, pq *[]Query, chnl chan []interface{}, wg2 *sync.W
 		panic(e)
 	}
 
+	// Look for matches in the http response data
 	var matches []interface{}
 	var totals float64
 	if contain["total"] != nil {
@@ -73,6 +73,7 @@ func shodanQuery(query *Query, pq *[]Query, chnl chan []interface{}, wg2 *sync.W
 			pages := int(math.Ceil(totals / 100))
 			var i int
 			for i = 1; i <= pages; i++ {
+				// Create a new page query for any total over 100 results
 				*pq = append(*pq, Query{Query: query.Query, Page: i})
 				fmt.Println(i)
 			}
@@ -81,5 +82,10 @@ func shodanQuery(query *Query, pq *[]Query, chnl chan []interface{}, wg2 *sync.W
 		log.Println("message=no_results_for_query error=results_nil")
 	}
 
-	chnl <- matches
+	// Extract iocs and return any results
+	data := extractIOCs(matches)
+	wg2.Done()
+	for _, d := range data {
+		ch <- d
+	}
 }
