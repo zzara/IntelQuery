@@ -9,29 +9,58 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
-// create urlscan client
-// curl "https://urlscan.io/api/v1/search/?q=domain:urlscan.io&size=1&offset=0"
+// Create urlscan client
+// Curl "https://urlscan.io/api/v1/search/?q=domain:urlscan.io&size=1&offset=0"
 func NewUrlscanClient() *QueryClient {
 	basePath := "https://urlscan.io"
 	searchPath := "/api/v1/search/"
 	apiKey := os.Getenv("URLSCAN_KEY")
 
+	today := time.Now().Format(time.RFC3339)
+	date, _ := time.Parse(time.RFC3339, today)
+
 	return &QueryClient{
 		clientType:  "urlscan",
-		queries:     queryLoader("urlscan_queries_test"),
+		queries:     queryLoader("urlscan_queries"),
 		apiKey:      apiKey,
 		baseUrl:     basePath,
 		searchPath:  searchPath,
 		queryString: basePath + searchPath + "?q=",
-		queryPage:   "&offset=",
+		queryPage:   fmt.Sprintf("%%20AND%%20date:%d-%02d-%02d&size=100&offset=", date.Year(), date.Month(), date.Day()),
 		startPage:   0,
 		rateLimit:   2000,
 	}
 }
 
-// client query function
+func urlscanParseTime(data []interface{}) []interface{} {
+	now := time.Now()
+	eightHoursBack := now.Add(time.Duration(-480) * time.Minute)
+
+	layout := "2006-01-02T15:04:05.000Z"
+
+	var filteredData []interface{}
+
+	for _, d := range data {
+
+		resultTimeString := fmt.Sprintf("%v", d.(map[string]interface{})["task"].(map[string]interface{})["time"])
+		resultTime, err := time.Parse(layout, resultTimeString)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		if resultTime.After(eightHoursBack) {
+			//fmt.Println(resultTime)
+			filteredData = append(filteredData, d)
+		}
+	}
+	return filteredData
+}
+
+// Client query function
 func urlscanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup) {
 
 	url, err := url.Parse(query.Query + strconv.Itoa(query.Page))
@@ -44,13 +73,13 @@ func urlscanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup
 	respBodyStr := handleRequest(url)
 	file := processResponse(respBodyStr)
 
-	// a map container to decode the JSON structure into
+	// A map container to decode the JSON structure into
 	contain := make(map[string]interface{})
 
-	// unmarshal JSON
+	// Unmarshal JSON
 	e := json.Unmarshal(file, &contain)
 
-	// panic on error
+	// Panic on error
 	if e != nil {
 		panic(e)
 	}
@@ -74,17 +103,25 @@ func urlscanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup
 			var i int
 			for i = 1; i <= pages; i++ {
 				// Create a new page query for any total over 100 results
-				*pq = append(*pq, Query{Query: query.Query, Page: i})
-				fmt.Println(i)
+				*pq = append(*pq, Query{Query: query.Query, Page: i * 100})
+				//fmt.Println(i)
 			}
 		}
 	} else {
 		log.Println("message=no_results_for_query error=results_nil")
 	}
 
-	data := extractIOCs(matches)
-	wg2.Done()
-	for _, d := range data {
-		ch <- d
+	timeFiltered := urlscanParseTime(matches)
+	data := extractIOCs(timeFiltered)
+
+	for i := 0; i < len(data); i++ {
+		if i+2 > len(data) {
+			break
+		} else {
+			go func(ch chan<- string, data string) {
+				ch <- data
+			}(ch, data[i])
+		}
 	}
+	wg2.Done()
 }
