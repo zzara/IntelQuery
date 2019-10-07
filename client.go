@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
-	"runtime"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
 // Json map for loading queries from the Json query file
@@ -40,6 +42,29 @@ type Query struct {
 	Page  int
 }
 
+// Struct for handling AWS sessions
+type AwsSession struct {
+	dynamoClient *dynamodb.DynamoDB
+}
+
+// Create new instance of an AWS session
+func newDynamoSession() *AwsSession {
+	sess := session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+	}))
+	return &AwsSession{dynamoClient: dynamodb.New(sess)}
+}
+
+// Write new value to table
+func (as *AwsSession) dynamoStoreUrl(url string) {
+	return
+}
+
+// Get a value from a table
+func (as *AwsSession) dynamoGetUrl(url string) string {
+	return url
+}
+
 // Request func for iterating through API calls to different services
 func requestor(qc *QueryClient, clientQuery func(*Query, *[]Query, chan string, *sync.WaitGroup), ch chan string, wg *sync.WaitGroup) {
 	// Wait group for queryApiChannels
@@ -63,7 +88,7 @@ func requestor(qc *QueryClient, clientQuery func(*Query, *[]Query, chan string, 
 	if len(pagequeries) > 0 {
 		for _, ci := range pagequeries {
 			wg2.Add(1)
-			query := &Query{Query: qc.queryString + ci.Query + qc.queryPage, Page: ci.Page}
+			query := &Query{Query: ci.Query, Page: ci.Page}
 			go clientQuery(query, &pagequeries, ch, &wg2)
 			time.Sleep(time.Millisecond * time.Duration(qc.rateLimit))
 		}
@@ -78,26 +103,30 @@ func requestor(qc *QueryClient, clientQuery func(*Query, *[]Query, chan string, 
 // Use regexp to look for domains and URLs in the matched queries
 func extractIOCs(data []interface{}) []string {
 	var resultIOCs []string
-	urlRe := regexp.MustCompile("((?:ht)?f?tps?:\\/\\/?(?:[a-z0-9_]{1,}\\.){1,}[a-z]{1,10}(?:\\/(?:[a-zA-Z0-9_\\-\\?\\!\\@\\#\\:\\(\\)\\=\\+\\&]{1,})?){0,})")
-	ipRe := regexp.MustCompile("([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})")
+	urlRe := regexp.MustCompile(`((?:ht)?f?tps?://?(?:[a-z0-9-]{1,}[.]){1,}[a-z]{1,10}(?:/(?:[a-zA-Z0-9\_\.\,\-\?\!\@\#\:\;\~\^\%\$\*\(\)\=\+\&]{1,})?){0,})`)
+	//ipRe := regexp.MustCompile("([0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3})")
 	for _, d := range data {
 		str := fmt.Sprintf("%v", d)
 		//fmt.Println(str)
 		urlMatch := urlRe.FindStringSubmatch(str)
 		if urlMatch != nil {
 			for _, ioc := range urlMatch[1:] {
-				fmt.Println(ioc)
+				//fmt.Println(ioc)
 				resultIOCs = append(resultIOCs, fmt.Sprintf("%s", ioc))
 			}
 		}
-		ipMatch := ipRe.FindStringSubmatch(str)
-		if ipMatch != nil {
-			for _, ioc := range ipMatch[1:] {
-				fmt.Println(ioc)
-				resultIOCs = append(resultIOCs, fmt.Sprintf("%s", ioc))
+		// Find IP addresses
+		/*
+			ipMatch := ipRe.FindStringSubmatch(str)
+			if ipMatch != nil {
+				for _, ioc := range ipMatch[1:] {
+					fmt.Println(ioc)
+					resultIOCs = append(resultIOCs, fmt.Sprintf("%s", ioc))
+				}
 			}
-		}
+		*/
 	}
+
 	return resultIOCs
 }
 
@@ -112,15 +141,42 @@ func queryApiChannels() {
 	wg.Add(1)
 	go requestor(NewUrlscanClient(), urlscanQuery, ch, &wg)
 
+	var data []string
+
+	go func(ch chan string, data *[]string) {
+		for {
+			v, ok := <-ch
+			if ok == false {
+				break
+			}
+			//fmt.Println("Received ", len(v), ok)
+			*data = append(*data, v)
+		}
+	}(ch, &data)
+
 	wg.Wait()
 
-	// Close channel and get data
+	time.Sleep(10 * time.Second)
 	close(ch)
-	data := <-ch
 
-	// Print data from channel
+	// Start dynamodb session
+	dynamoSession := newDynamoSession()
+	// For data, check dynamo table for URL
+	// If URL in table, pass, else write new URL to table
 	for _, d := range data {
-		fmt.Println(d)
+		//url := fmt.Sprintf("%#U", d)
+		url := fmt.Sprintf("%s", d)
+		fmt.Println(url)
+
+		// Get new ul from table
+		stored_url := dynamoSession.dynamoGetUrl(url)
+		if len(stored_url) > 0 {
+
+		} else {
+			// Write new url to dynamo db table
+			dynamoSession.dynamoStoreUrl(url)
+		}
+
 	}
 }
 
@@ -163,17 +219,10 @@ func handleRequest(url *url.URL) string {
 // Loads and maps each query from the Json query file
 func queryLoader(filename string) []QueryMapper {
 
-	// Get folder path of the current binary execution
-	_, goBinPath, _, _ := runtime.Caller(0)
-	// Split file path
-	dirSplitPath := strings.Split(goBinPath, "/")
-	// Remove last element of array
-	dirPathMod := dirSplitPath[:len(dirSplitPath)-1]
-	// join path
-	dirPath := strings.Join(dirPathMod, "/")
+	dirPath, _ := filepath.Abs("queries")
 
 	// Load the Json query file into f
-	f, err := os.Open(fmt.Sprintf("%s/queries/%s%s", dirPath, filename, ".json"))
+	f, err := os.Open(fmt.Sprintf("%s/%s%s", dirPath, filename, ".json"))
 	if err != nil {
 		log.Printf("message=failed_to_open_query_file error=%s\n", err)
 	}
