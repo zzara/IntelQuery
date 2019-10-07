@@ -11,8 +11,8 @@ import (
 	"sync"
 )
 
-// create shodan client
-// curl -X GET 'https://api.shodan.io/shodan/host/search?key<apikey>&query=http.title:shodan&page=0'
+// Create shodan client
+// Curl -X GET 'https://api.shodan.io/shodan/host/search?key<apikey>&query=http.title:paypal&page=0'
 func NewShodanClient() *QueryClient {
 	basePath := "https://api.shodan.io"
 	searchPath := "/shodan/host/search"
@@ -20,7 +20,7 @@ func NewShodanClient() *QueryClient {
 
 	return &QueryClient{
 		clientType:  "shodan",
-		queries:     queryLoader("shodan_queries_test"),
+		queries:     queryLoader("shodan_queries"),
 		apiKey:      apiKey,
 		baseUrl:     basePath,
 		searchPath:  searchPath,
@@ -31,7 +31,7 @@ func NewShodanClient() *QueryClient {
 	}
 }
 
-// client query function
+// Client query function
 func shodanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup) {
 
 	url, err := url.Parse(query.Query + strconv.Itoa(query.Page))
@@ -44,13 +44,13 @@ func shodanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup)
 	respBodyStr := handleRequest(url)
 	file := processResponse(respBodyStr)
 
-	// a map container to decode the JSON structure into
+	// A map container to decode the JSON structure into
 	contain := make(map[string]interface{})
 
-	// unmarshal JSON
+	// Unmarshal JSON
 	e := json.Unmarshal(file, &contain)
 
-	// panic on error
+	// Panic on error
 	if e != nil {
 		panic(e)
 	}
@@ -79,13 +79,20 @@ func shodanQuery(query *Query, pq *[]Query, ch chan string, wg2 *sync.WaitGroup)
 			}
 		}
 	} else {
-		log.Println("message=no_results_for_query error=results_nil")
+		log.Printf("message=no_results_for_query error=results_nil query=%s\n", query.Query)
 	}
 
 	// Extract iocs and return any results
 	data := extractIOCs(matches)
-	wg2.Done()
-	for _, d := range data {
-		ch <- d
+
+	for i := 0; i < len(data); i++ {
+		if i+2 > len(data) {
+			break
+		} else {
+			go func(ch chan<- string, data string) {
+				ch <- data
+			}(ch, data[i])
+		}
 	}
+	wg2.Done()
 }
