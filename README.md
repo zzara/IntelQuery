@@ -1,4 +1,4 @@
-# intelquery
+# IntelQuery
 query multiple intelligence apis
 
 ## Compile
